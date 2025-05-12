@@ -1,0 +1,415 @@
+<?php
+include 'header.php';
+require_once 'config.php';
+checkAuth();
+checkRole(array('admin'));
+
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+// Обработка действий администратора
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['approve_payment'])) {
+        $event_id = (int)$_POST['event_id'];
+        
+        $stmt = $pdo->prepare("UPDATE events SET promotion_paid = 1 WHERE id = ?");
+        $stmt->execute(array($event_id));
+        
+        // Получаем данные мероприятия для уведомления
+        $event = $pdo->query("SELECT e.title, u.email FROM events e JOIN users u ON e.organizer_id = u.id WHERE e.id = $event_id")->fetch(PDO::FETCH_ASSOC);
+        
+        // Отправляем уведомление организатору
+        $subject = "Оплата за рекламное размещение подтверждена";
+        $message = "Оплата за рекламное размещение мероприятия \"{$event['title']}\" подтверждена администратором.";
+        sendEmail($event['email'], $subject, $message);
+        
+        $_SESSION['success'] = "Оплата подтверждена";
+        header("Location: admin.php");
+        exit();
+    } elseif (isset($_POST['trust_organizer'])) {
+        $organizer_id = (int)$_POST['organizer_id'];
+        
+        $stmt = $pdo->prepare("UPDATE users SET is_trusted = 1 WHERE id = ? AND role = 'organizer'");
+        $stmt->execute(array($organizer_id));
+        
+        $_SESSION['success'] = "Организатор теперь доверенный";
+        header("Location: admin.php");
+        exit();
+    }
+}
+
+// Определяем активный фильтр
+$active_filter = isset($_GET['filter']) ? $_GET['filter'] : 'all';
+
+// Получаем данные в зависимости от фильтра
+switch ($active_filter) {
+    case 'users':
+        $data = $pdo->query("SELECT * FROM users ORDER BY created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+        $title = "Все пользователи";
+        break;
+    case 'events':
+        $data = $pdo->query("SELECT e.*, u.username as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id ORDER BY e.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+        $title = "Все мероприятия";
+        break;
+    case 'pending':
+        $data = $pdo->query("SELECT e.*, u.username as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE e.is_approved = 0 ORDER BY e.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+        $title = "Мероприятия на модерации";
+        break;
+    case 'promoted':
+        $data = $pdo->query("SELECT e.*, u.username as organizer_name FROM events e JOIN users u ON e.organizer_id = u.id WHERE e.is_promoted = 1 ORDER BY e.created_at DESC")->fetchAll(PDO::FETCH_ASSOC);
+        $title = "Рекламные мероприятия";
+        break;
+    default:
+        $active_filter = 'all';
+        $title = "Панель администратора";
+}
+
+// Получаем статистику
+$stats = $pdo->query("
+    SELECT 
+        (SELECT COUNT(*) FROM users) as users_count,
+        (SELECT COUNT(*) FROM events) as events_count,
+        (SELECT COUNT(*) FROM events WHERE is_approved = 0) as pending_events,
+        (SELECT COUNT(*) FROM events WHERE is_promoted = 1) as promoted_events,
+        (SELECT COUNT(*) FROM events WHERE is_promoted = 1 AND promotion_paid = 1) as paid_promoted_events
+")->fetch(PDO::FETCH_ASSOC);
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель администратора</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .stat-card {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .active-filter {
+            border: 3px solid #0d6efd !important;
+        }
+    </style>
+</head>
+<body>
+    <?php include 'header.php'; ?>
+    
+    <div class="container mt-4">
+        <h2 class="mb-4"><?= $title ?></h2>
+        
+        <?php if (isset($_SESSION['success'])): ?>
+        <div class="alert alert-success"><?= $_SESSION['success'] ?></div>
+        <?php unset($_SESSION['success']); endif; ?>
+        
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <a href="admin.php?filter=users" class="text-decoration-none">
+                    <div class="card text-white bg-primary stat-card <?= $active_filter == 'users' ? 'active-filter' : '' ?>">
+                        <div class="card-body">
+                            <h5 class="card-title">Пользователей</h5>
+                            <p class="card-text display-6"><?= $stats['users_count'] ?></p>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-md-3">
+                <a href="admin.php?filter=events" class="text-decoration-none">
+                    <div class="card text-white bg-success stat-card <?= $active_filter == 'events' ? 'active-filter' : '' ?>">
+                        <div class="card-body">
+                            <h5 class="card-title">Мероприятий</h5>
+                            <p class="card-text display-6"><?= $stats['events_count'] ?></p>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-md-3">
+                <a href="admin.php?filter=pending" class="text-decoration-none">
+                    <div class="card text-white bg-warning stat-card <?= $active_filter == 'pending' ? 'active-filter' : '' ?>">
+                        <div class="card-body">
+                            <h5 class="card-title">На модерации</h5>
+                            <p class="card-text display-6"><?= $stats['pending_events'] ?></p>
+                        </div>
+                    </div>
+                </a>
+            </div>
+            <div class="col-md-3">
+                <a href="admin.php?filter=promoted" class="text-decoration-none">
+                    <div class="card text-white bg-info stat-card <?= $active_filter == 'promoted' ? 'active-filter' : '' ?>">
+                        <div class="card-body">
+                            <h5 class="card-title">Рекламные</h5>
+                            <p class="card-text display-6"><?= $stats['promoted_events'] ?></p>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+        
+        <?php if ($active_filter != 'all'): ?>
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5><?= $title ?></h5>
+            </div>
+            <div class="card-body">
+                <?php if (empty($data)): ?>
+                <div class="alert alert-info">Данные не найдены</div>
+                <?php else: ?>
+                <div class="table-responsive">
+                    <?php if ($active_filter == 'users'): ?>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Имя</th>
+            <th>Email</th>
+            <th>Роль</th>
+            <th>Дата регистрации</th>
+        </tr>
+    </thead>
+    <tbody>
+        <?php foreach ($data as $user): ?>
+        <tr>
+            <td><?= $user['id'] ?></td>
+            <td><?= htmlspecialchars($user['username']) ?></td>
+            <td><?= htmlspecialchars($user['email']) ?></td>
+            <td><?= $user['role'] ?></td>
+            <td><?= date('d.m.Y H:i', strtotime($user['created_at'])) ?></td>
+        </tr>
+        <?php endforeach; ?>
+    </tbody>
+</table>
+<?php else: ?>
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Название</th>
+            <th>Организатор</th>
+            <th>Дата</th>
+            <th>Статус</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        <?php foreach ($data as $event): ?>
+        <tr>
+            <td><?= $event['id'] ?></td>
+            <td><?= htmlspecialchars($event['title']) ?></td>
+            <td><?= htmlspecialchars($event['organizer_name']) ?></td>
+            <td><?= date('d.m.Y H:i', strtotime($event['date_start'])) ?></td>
+            <td>
+                <?php if (!$event['is_approved']): ?>
+                <span class="badge bg-warning">На модерации</span>
+                <?php elseif ($event['is_promoted'] && !$event['promotion_paid']): ?>
+                <span class="badge bg-danger">Ожидает оплаты</span>
+                <?php endif; ?>
+            </td>
+            <td>
+                <a href="moderation.php?event_id=<?= $event['id'] ?>" class="btn btn-sm btn-primary">Просмотр</a>
+            </td>
+        </tr>
+        <?php endforeach; ?>
+    </tbody>
+</table>
+<?php endif; ?>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php else: ?>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-4">
+					<div class="card-header bg-danger text-white">
+					<h5>Ожидают оплаты</h5>
+					</div>
+					<div class="card-body">
+						<?php if (empty($unpaid_events)): ?>
+						<div class="alert alert-info">Нет мероприятий, ожидающих оплаты</div>
+						<?php else: ?>
+						<table class="table table-striped">
+						<thead>
+							<tr>
+								<th>Название</th>
+								<th>Организатор</th>
+								<th>Действия</th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ($unpaid_events as $event): ?>
+							<tr>
+								<td><?= htmlspecialchars($event['title']) ?></td>
+								<td><?= htmlspecialchars($event['organizer_name']) ?></td>
+								<td>
+                            <form method="POST">
+                                <input type="hidden" name="event_id" value="<?= $event['id'] ?>">
+                                <button type="submit" name="approve_payment" class="btn btn-sm btn-success">Подтвердить оплату</button>
+                            </form>
+								</td>
+							</tr>
+							<?php endforeach; ?>
+						</tbody>
+						</table>
+					<?php endif; ?>
+					</div>
+				</div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card mb-4">
+                    <div class="card-header bg-warning text-dark">
+                        <h5>Новые организаторы</h5>
+                    </div>
+                    <div class="card-body">
+                        <?php
+                        $organizers = $pdo->query("
+                            SELECT id, username, email, created_at 
+                            FROM users 
+                            WHERE role = 'organizer' AND is_trusted = 0
+                            ORDER BY created_at DESC
+                            LIMIT 5
+                        ")->fetchAll(PDO::FETCH_ASSOC);
+                        ?>
+                        
+                        <?php if (empty($organizers)): ?>
+                        <div class="alert alert-info">Нет организаторов для проверки</div>
+                        <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Имя</th>
+                                        <th>Email</th>
+                                        <th>Дата регистрации</th>
+                                        <th>Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($organizers as $organizer): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($organizer['username']) ?></td>
+                                        <td><?= htmlspecialchars($organizer['email']) ?></td>
+                                        <td><?= date('d.m.Y', strtotime($organizer['created_at'])) ?></td>
+                                        <td>
+                                            <form method="POST" class="d-inline">
+                                                <input type="hidden" name="organizer_id" value="<?= $organizer['id'] ?>">
+                                                <button type="submit" name="trust_organizer" class="btn btn-sm btn-success">Сделать доверенным</button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                            <div class="text-end mt-2">
+                                <a href="admin.php?filter=users" class="btn btn-sm btn-outline-warning">Все организаторы</a>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+сб, 10 мая 2025 г. в 16:35, Sergey ForelJ <sergeyzhinskiy@gmail.com>:
+<?php
+require_once 'config.php';
+checkAuth();
+
+// Получаем данные текущего пользователя
+$stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+// Обработка формы обновления профиля
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
+    $username = sanitize($_POST['username']);
+    $email = sanitize($_POST['email']);
+    $current_password = $_POST['current_password'];
+    $new_password = $_POST['new_password'];
+    
+    $errors = [];
+    
+    // Проверка уникальности username и email
+    $stmt = $pdo->prepare("SELECT id FROM users WHERE (username = ? OR email = ?) AND id != ?");
+    $stmt->execute([$username, $email, $_SESSION['user_id']]);
+    if ($stmt->fetch()) {
+        $errors[] = "Имя пользователя или email уже заняты";
+    }
+    
+    // Если пытаются изменить пароль
+    if (!empty($new_password)) {
+        if (!password_verify($current_password, $user['password'])) {
+            $errors[] = "Текущий пароль неверен";
+        } elseif (strlen($new_password) < 6) {
+            $errors[] = "Новый пароль должен быть не менее 6 символов";
+        }
+    }
+    
+    if (empty($errors)) {
+        $data = [
+            'username' => $username,
+            'email' => $email,
+            'id' => $_SESSION['user_id']
+        ];
+        
+        $sql = "UPDATE users SET username = :username, email = :email";
+        
+        // Обновляем пароль, если он был изменен
+        if (!empty($new_password)) {
+            $sql .= ", password = :password";
+            $data['password'] = password_hash($new_password, PASSWORD_DEFAULT);
+        }
+        
+        $sql .= " WHERE id = :id";
+        
+        $stmt = $pdo->prepare($sql);
+        if ($stmt->execute($data)) {
+            $_SESSION['success'] = "Профиль успешно обновлен";
+            $_SESSION['username'] = $username;
+            header("Location: profile.php");
+            exit();
+        } else {
+            $errors[] = "Ошибка при обновлении профиля";
+        }
+    }
+}
+
+// Получаем мероприятия пользователя (для организаторов)
+$user_events = [];
+if ($_SESSION['user_role'] === 'organizer') {
+    $stmt = $pdo->prepare("
+        SELECT e.*, c.name as category_name 
+        FROM events e 
+        JOIN categories c ON e.category_id = c.id 
+        WHERE e.organizer_id = ? 
+        ORDER BY e.date_start DESC
+        LIMIT 5
+    ");
+    $stmt->execute([$_SESSION['user_id']]);
+    $user_events = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Профиль пользователя</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+сб, 10 мая 2025 г. в 16:28, Sergey ForelJ <sergeyzhinskiy@gmail.com>:
+ 
+
+сб, 10 мая 2025 г. в 16:26, Sergey ForelJ <sergeyzhinskiy@gmail.com>:
+ 

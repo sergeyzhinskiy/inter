@@ -1,0 +1,74 @@
+<?php
+require_once 'config.php';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $username = trim($_POST['username']);
+    $password = trim($_POST['password']);
+    
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE username = ?");
+    $stmt->execute(array($username));
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($user && password_verify($password, $user['password'])) {
+        $_SESSION['user_id'] = $user['id'];
+        $_SESSION['username'] = $user['username'];
+        $_SESSION['user_role'] = $user['role'];
+        header('Location: index.php');
+        exit();
+    } else {
+        $error = "Неверное имя пользователя или пароль";
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+   <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход в систему</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .login-container { max-width: 400px; margin: 100px auto; }
+    </style>
+</head>
+<body>
+    <div class="container login-container">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white text-center">
+                <h4>Вход в систему</h4>
+            </div>
+            <div class="card-body">
+                <?php if (isset($error)): ?>
+                <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+                <?php endif; ?>
+                
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Имя пользователя</label>
+                        <input type="text" class="form-control" id="username" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Пароль</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Войти</button>
+                </form>
+                
+                <div class="mt-3 text-center">
+                    <p>Тестовые пользователи:</p>
+                    <ul class="list-group">
+                        <li class="list-group-item">Пользователь: 1 / 1</li>
+                        <li class="list-group-item">Организатор: 2 / 2</li>
+                        <li class="list-group-item">Модератор: 3 / 3</li>
+                        <li class="list-group-item">Администратор: 4 / 4</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
