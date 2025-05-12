@@ -35,6 +35,7 @@
 3. Администратор:  
    - Модерировать заявки (одобрять/отклонять).  
    - Отмечать платные события как "Реклама" для модераторов и администраторов.
+0 примеры меток ![18](https://github.com/user-attachments/assets/145b3fcc-160f-45f5-9832-900ce96e4251)
 
 1 ![9](https://github.com/user-attachments/assets/883cce02-9ec4-4113-b7cb-52d2f79e2da6)
 2![10](https://github.com/user-attachments/assets/d57c0a50-ae57-4465-8309-0b014b4adf3c)
